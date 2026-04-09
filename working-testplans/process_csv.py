@@ -26,8 +26,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Main repo: resolved via $WALLY env var
-REPO_ROOT = Path(os.environ["WALLY"]) / "addins" / "riscv-arch-test-cvw"
+# Main repo: auto-detect from cwd (works in worktrees)
+import subprocess as _sp
+REPO_ROOT = Path(_sp.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 # Claude repo
 CLAUDE_ROOT = Path(__file__).resolve().parents[1]
 WORKING_TESTPLANS = Path(__file__).parent

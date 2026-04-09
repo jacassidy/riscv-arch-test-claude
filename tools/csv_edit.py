@@ -9,8 +9,9 @@ import os
 import sys
 from pathlib import Path
 
-# Main repo: resolved via $WALLY env var
-_REPO_ROOT = Path(os.environ["WALLY"]) / "addins" / "riscv-arch-test-cvw"
+# Main repo: auto-detect from cwd (works in worktrees)
+import subprocess as _sp
+_REPO_ROOT = Path(_sp.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 TESTPLANS_DIR = _REPO_ROOT / "testplans"
 
 

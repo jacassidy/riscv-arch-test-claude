@@ -1,6 +1,6 @@
 # architecture.md — Project Architecture & Reference
 
-> **This file lives in `riscv-arch-test-claude`.** All new Claude-generated files belong here, not in the main repo. The main repo is at `$WALLY/addins/riscv-arch-test-cvw/`.
+> **This file lives in `riscv-arch-test-claude`.** All new Claude-generated files belong here, not in the main repo. The main repo is your current working directory (whichever checkout or worktree this CLAUDE.md is symlinked into).
 
 ## Overview
 

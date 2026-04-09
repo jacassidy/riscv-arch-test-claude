@@ -23,7 +23,8 @@ from pathlib import Path
 
 # Setup paths
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO = Path(os.environ["WALLY"]) / "addins" / "riscv-arch-test-cvw"
+# Main repo: auto-detect from cwd (works in worktrees)
+REPO = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 
 sys.path.insert(0, str(SCRIPT_DIR))
 from testplan_manager import isolate_column, restore_testplans

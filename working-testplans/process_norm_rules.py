@@ -66,8 +66,9 @@ CONTEXT_COLUMNS = ["Instruction", "EFFEW8", "EFFEW16", "EFFEW32", "EFFEW64"]
 # ===============================
 
 WORKING_TESTPLANS = Path(__file__).parent
-# Main repo: resolved via $WALLY env var
-REPO_ROOT = Path(os.environ["WALLY"]) / "addins" / "riscv-arch-test-cvw"
+# Main repo: auto-detect from cwd (works in worktrees)
+import subprocess as _sp
+REPO_ROOT = Path(_sp.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 
 
 # ---------------------------------------------------------------------------

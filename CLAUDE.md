@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **This is the Claude working files repo (`riscv-arch-test-claude`).** All new Claude-generated files (guides, scripts, tools, notes) must be created here, not in the main `riscv-arch-test-cvw` repo. The main repo lives at `$WALLY/addins/riscv-arch-test-cvw/`.
+> **This is the Claude working files repo (`riscv-arch-test-claude`).** All new Claude-generated files (guides, scripts, tools, notes) must be created here, not in the main working repo. The main working repo is your current working directory — whichever checkout or worktree this CLAUDE.md is symlinked into. If you are in a git worktree, all edits target that worktree's directory, not the primary checkout.
 
 ## Rules
 
@@ -9,7 +9,7 @@
 - Read the guide for a task before reading raw code.
 - **NEVER use Agent with `subagent_type=Explore`** unless the user explicitly gives permission. Direct Grep/Glob/Read is fine.
 - **Context refresh between problems**: When switching from one problem/coverpoint to another, STOP. Re-read the relevant guide files from the Task Routing table below. Then summarize your current context: what was just completed, what you're starting next, and what the current state is. This is where context drift happens — prevent it by resetting at every transition.
-- **File creation rule**: Any new guides, notes, scripts, or tools you create belong in this repo (`riscv-arch-test-claude`), NOT in the main working repo. Only files that are part of the upstream project (test generators, coverpoint scripts, configs) belong in `riscv-arch-test-cvw`.
+- **File creation rule**: Any new guides, notes, scripts, or tools you create belong in this repo (`riscv-arch-test-claude`), NOT in the main working repo. Only files that are part of the upstream project (test generators, coverpoint scripts, configs) belong in the current working repo.
 
 ## Task Routing
 

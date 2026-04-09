@@ -7,8 +7,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Main repo: resolved via $WALLY env var
-REPO_ROOT = Path(os.environ["WALLY"]) / "addins" / "riscv-arch-test-cvw"
+# Main repo: auto-detect from cwd (works in worktrees)
+import subprocess as _sp
+REPO_ROOT = Path(_sp.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 CUSTOM_DIR = REPO_ROOT / "generators" / "testgen" / "scripts" / "custom"
 TEMPLATES_DIR = REPO_ROOT / "generators" / "coverage" / "templates" / "vector"
 

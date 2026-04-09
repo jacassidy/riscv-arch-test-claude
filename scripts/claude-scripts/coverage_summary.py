@@ -22,8 +22,9 @@ import sys
 import argparse
 from pathlib import Path
 
-# Main repo: resolved via $WALLY env var
-REPO_ROOT = Path(os.environ["WALLY"]) / "addins" / "riscv-arch-test-cvw"
+# Main repo: auto-detect from cwd (works in worktrees)
+import subprocess as _sp
+REPO_ROOT = Path(_sp.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 REPORT_DIRS = {
     "rv64": REPO_ROOT / "work/sail-rv64-max/reports",
     "rv32": REPO_ROOT / "work/sail-rv32-max/reports",
