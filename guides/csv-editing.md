@@ -28,6 +28,38 @@ Always call `read_structure()` first. Do NOT read full CSVs with the Read tool �
 
 CSV editor agents are launched fresh per row with NO conversation history. All knowledge must come from .md files. If you learn something new, add it to the appropriate guide before finishing.
 
+## Cell Value Semantics
+
+Most cells are `x` (coverpoint applies) or empty (does not). Two special markers exist for per-SEW gating:
+
+| Value       | Meaning                                                       |
+| ----------- | ------------------------------------------------------------- |
+| `x`         | Coverpoint applies for every SEW listed in EFFEW* columns     |
+| `sew_ge{N}` | Applies only when arch SEW ≥ N (e.g. `sew_ge16`, `sew_ge32`)  |
+| `sew_lte_{N}` | Applies only when arch SEW ≤ N (suffix form, see generate.py)|
+
+Use `sew_ge{N}` when a coverpoint is architecturally unreachable at low SEWs
+for that instruction — for example, a coverpoint requiring LMUL=2 applied to
+a seg load where `NF × EMUL > 8` at SEW=8.
+
+## Architectural Legality Lives in the CSV, Not generate.py
+
+**Rule:** If an (instruction, SEW) pair is an architecturally reserved
+encoding (e.g. `NF × EMUL > 8` for a seg load), blank its `EFFEW{N}` cell.
+If an (instruction, coverpoint) pair is unreachable at some SEWs because the
+coverpoint mandates a specific LMUL, use `sew_ge{N}` in that coverpoint's
+column instead of `x`.
+
+**Do not** add instruction/coverpoint legality filters to
+`generators/coverage/src/covergroupgen/generate.py`. Keep generate.py free of
+architectural filter tables (no `_nf_emul_legal`, `_CP_MIN_LMUL`, etc.) —
+those belong in the CSV data. The only SEW-aware logic in generate.py should
+be generic suffix handling (`sew_ge`, `sew_lte`, SEW_DEPENDENT_CPS).
+
+`MAXINDEXEEW_GE{N}` `\`ifdef` guards (config-side hardware support) are a
+different category and legitimately live in generate.py, because they vary
+per-config rather than per-architecture.
+
 ## Knowledge Persistence
 
 | Discovery Type                   | Add To                                                |

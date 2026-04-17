@@ -20,7 +20,7 @@ type: feedback
 **How to apply:** Always use .md guide files for context on testgen scripts. Check progress.json before starting any coverage work.
 
 ## Guide-First Approach
-- For ANY coverpoint or CSV task, read `guides/csv-editing.md` then `generators/coverage/templates/GUIDE.md` FIRST before doing anything else.
+- For ANY coverpoint or CSV task, read `guides/csv-editing.md` then `guides/coverpoint-templates.md` FIRST before doing anything else.
 - Do not explore the codebase or spawn search agents before reading these guides.
 
 **Why:** The guides contain all needed patterns, formats, and examples — exploring wastes time.

@@ -151,7 +151,7 @@ DEBUG=True timeout 10s make coverage   # max allowed
 | ------------------------ | ------------------------------------------------------------------------------------------------------ |
 | Planning next coverpoint | This file + `scripts/claude-scripts/progress.json`                                                     |
 | Fixing a test script     | `guides/custom-scripts/GUIDE.md` + `scripts/claude-scripts/knowledge.md`                               |
-| Fixing a template        | `scripts/claude-scripts/knowledge.md` + `(main repo) generators/coverage/src/covergroupgen/templates/vector/` |
+| Fixing a template        | `guides/coverpoint-templates.md` + `scripts/claude-scripts/knowledge.md` + `(main repo) generators/coverage/src/covergroupgen/templates/vector/` |
 
 ## Isolation
 

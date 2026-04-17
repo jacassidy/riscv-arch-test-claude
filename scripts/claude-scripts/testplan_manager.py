@@ -47,32 +47,17 @@ CATEGORY_CONFIG = {
 }
 
 
-# Explicit mapping for coverpoints whose names don't prefix-match their CSV column.
-# Key: coverpoint name from definitions CSV, Value: column name in VfCustom/VlsCustom CSV.
-EXPLICIT_COLUMN_MAP = {
-    "cp_custom_vfp_register_state_mstatus_dirty": "cp_custom_vfp_state",
-    "cp_custom_vfp_csr_state_mstatus_dirty": "cp_custom_vfp_state",
-    "cp_custom_f_freg_write_vl0": "cp_custom_vfp_state",
-}
-
-
 def _resolve_column_name(coverpoint_name: str, header: list[str]) -> str:
     """Resolve a coverpoint name to its column name in the CSV.
 
     The CSV uses parent column names (e.g. cp_custom_vfp_flags) that contain
     multiple child coverpoints (e.g. cp_custom_vfp_flags_set, cp_custom_vfp_flags_inactive_not_set).
     This function finds the matching column by trying exact match first, then
-    explicit mapping, then progressively shorter prefixes.
+    progressively shorter prefixes.
     """
     # Exact match
     if coverpoint_name in header:
         return coverpoint_name
-
-    # Explicit mapping
-    if coverpoint_name in EXPLICIT_COLUMN_MAP:
-        mapped = EXPLICIT_COLUMN_MAP[coverpoint_name]
-        if mapped in header:
-            return mapped
 
     # Try progressively shorter prefixes
     parts = coverpoint_name.split("_")

@@ -24,5 +24,5 @@ All paths below are relative to this repo (`riscv-arch-test-claude`) unless mark
 | Project structure, build commands      | `guides/architecture.md`                                                                       |
 | Debug a hanging test                   | `guides/debugging-hangs.md`                                                                    |
 | Known pitfalls and bugs                | `scripts/claude-scripts/knowledge.md`                                                          |
-| Fix/edit coverpoint templates          | `(main repo) generators/coverage/src/covergroupgen/templates/` (scalar) and `…/templates/vector/` (vector) |
+| Fix/edit coverpoint templates          | `guides/coverpoint-templates.md` (then `(main repo) generators/coverage/src/covergroupgen/templates/` for scalar and `…/templates/vector/` for vector) |
 | Simulator bugs / unsupported tests     | `simulator-issues.md`                                                                          |
