@@ -2,6 +2,12 @@
 
 > **This file lives in `riscv-arch-test-claude`.** All new Claude-generated files belong here, not in the main repo. The actual `cp_custom_*.py` scripts live in `(main repo) generators/testgen/scripts/custom/`.
 
+## Before You Start
+
+**⚠️ Always read the definition CSV before modifying any coverpoint template or script.** The definitions at `working-testplans/csvs/Vector - V{ls,x,f}_custom_definitions.csv` describe what each coverpoint tests, the expected behavior, and relevant spec quotes. Working without reading the definition leads to incorrect implementations.
+
+If coverage cannot reach 100%, follow the Spec-First Debugging Flow in `CLAUDE-coverage-workflow.md` — check the definition, quote the spec, get a Sail trace, and determine whether the issue is in the test gen, the template, or the simulator.
+
 ## Function Signature
 
 ```python
@@ -75,9 +81,39 @@ if emul * nf > 8:
     return  # Illegal: nf × EMUL exceeds 8
 ```
 
-### `writeTest(description, instruction, instruction_data, sew=None, lmul=1, vl=1, vstart=0, maskval=None, vxrm=None, frm=None, vxsat=None, vta=0, vma=0)`
+### `writeTest(description, instruction, instruction_data, sew=None, lmul=1, vl=1, vstart=0, maskval=None, vxrm=None, frm=None, vxsat=None, vta=0, vma=0, pre_test_lines=None, pre_instruction_lines=None, pre_test_scratch_regs=0)`
 
 Mask values: `"ones"`, `"zeroes"`, `"vlmaxm1_ones"`, `"vlmaxd2p1_ones"`, `"cp_mask_random"`, `"random_mask_0"`/`1`/`2`, or `None`
+
+`pre_test_lines` / `pre_instruction_lines` — lists of asm lines emitted before the testcase label / before the test instruction. See **Pre-test assembly and scratch registers** below — never put hand-picked `x{N}` literals in these lists.
+
+## Pre-test assembly and scratch registers
+
+If a custom script needs scratch scalar registers in `pre_test_lines` or `pre_instruction_lines`, it **must** request them via `pre_test_scratch_regs=N` and reference them as `{s0}`, `{s1}`, … inside f-string templates (escape the braces: `f"... x{{s0}} ..."`). `writeTest` allocates `N` unique X-registers via the centralized `scalar_registers_used` tracker and substitutes them into every line that contains a placeholder.
+
+**Why this matters**: `writeTest` calls `handleSignaturePointerConflict` after the custom script has already built its `pre_test_lines` strings. If the test's rs1/rs2 conflict with the default `sigReg` (x2), the resolver picks a new sigReg at random — which can be x31. A script that hand-picks a "safe" temp by scanning `range(31, 0, -1)` will land on x31 and silently clobber the signature pointer; the test then stores its signature to a tiny VLMAX value (e.g. `0x10`), faults, and hangs in the trap loop (no trap handler installed). This bug existed in `cp_custom_ffLS.py` and stalled coverage runs.
+
+**Right** (centralized allocation):
+
+```python
+pre_lines = [
+    "vsetivli x0, 1, e8, m1, tu, mu",
+    "vmv.v.i v0, 2",
+    f"vsetvli x{{s0}}, x0, e{sew}, m{lmulflag}, tu, mu",
+]
+writeTest(desc, test, data, sew=sew, lmul=lmul, vl="vlmax",
+          maskval="zeroes", pre_test_lines=pre_lines,
+          pre_test_scratch_regs=1)
+```
+
+**Wrong** (hand-picked, races with sigReg switch):
+
+```python
+avoid = {rs1, rs2, common.sigReg, 0}
+temp = next(r for r in range(31, 0, -1) if r not in avoid)  # may pick x31!
+pre_lines = [f"vsetvli x{temp}, x0, e{sew}, m{lmulflag}, tu, mu"]
+writeTest(..., pre_test_lines=pre_lines)
+```
 
 ### Counters
 

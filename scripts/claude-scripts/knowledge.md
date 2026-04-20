@@ -33,6 +33,7 @@ Without trace evidence, label the issue "suspected." See `simulator-issues.md` i
 - Always add `if sew > common.flen: return` guard for FP scripts (V spec Section 3.4 requires SEW ≤ FLEN for FP instructions)
 - `.wf` scalar presets: use SEW-sized values for `fs1_val`, not widened-width (scalar load follows SEW)
 - **LS register assignment and nf×EMUL guard** — see GUIDE.md "Important: Register Assignment for LS Instructions" and the nf×EMUL guard pattern
+- **Never write `x{N}` literals into `pre_test_lines` / `pre_instruction_lines`.** Use `pre_test_scratch_regs=N` + `{s0}`/`{s1}` placeholders. See GUIDE.md § Pre-test assembly. (Why: `handleSignaturePointerConflict` can reassign `sigReg` to *any* register — including x31 — after the script runs, silently colliding with hand-picked temps and causing a sail hang.)
 
 ## Template Rules
 

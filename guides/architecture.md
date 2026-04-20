@@ -34,6 +34,16 @@ FAST=True make coverage              # Recompiles elfs (~2 min), re-sims only mi
 If test content is unchanged (same seed), coverage completes in ~2s. See
 `guides/custom-scripts/CLAUDE-coverage-workflow.md` for details.
 
+## Never Edit Generated Files
+
+`coverpoints/unpriv/*_coverage.svh` and `tests/rv{32,64}i/**/*.S` are **generated
+outputs** — never hand-edit them. Changes land in sources and flow through regen:
+
+- Coverpoint `.svh` ← templates in `generators/coverage/src/covergroupgen/templates/`
+- Test `.S` ← `generators/testgen/scripts/custom/*.py` + CSV testplans
+
+Edit the template/script/CSV, then rerun `make vector-tests` (or `make coverage`).
+
 ## Pipeline: CSV to ELF
 
 1. CSV testplan maps instructions to coverpoints

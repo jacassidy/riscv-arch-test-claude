@@ -147,11 +147,64 @@ DEBUG=True timeout 10s make coverage   # max allowed
 
 ## What to read and when
 
-| When                     | Read                                                                                                   |
-| ------------------------ | ------------------------------------------------------------------------------------------------------ |
-| Planning next coverpoint | This file + `scripts/claude-scripts/progress.json`                                                     |
-| Fixing a test script     | `guides/custom-scripts/GUIDE.md` + `scripts/claude-scripts/knowledge.md`                               |
-| Fixing a template        | `guides/coverpoint-templates.md` + `scripts/claude-scripts/knowledge.md` + `(main repo) generators/coverage/src/covergroupgen/templates/vector/` |
+| When                                | Read                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Planning next coverpoint            | This file + `scripts/claude-scripts/progress.json`                                                     |
+| **Modifying any template or script** | **Definition CSV first** (`working-testplans/csvs/Vector - V{ls,x,f}_custom_definitions.csv`) — understand what the coverpoint is testing and what the spec says before touching code |
+| Fixing a test script                | `guides/custom-scripts/GUIDE.md` + `scripts/claude-scripts/knowledge.md`                               |
+| Fixing a template                   | `guides/coverpoint-templates.md` + `scripts/claude-scripts/knowledge.md` + `(main repo) generators/coverage/src/covergroupgen/templates/vector/` |
+| Investigating coverage failure      | Definition CSV → RISC-V V spec → Sail trace (see "Spec-First Debugging" below)                         |
+
+**⚠️ MANDATORY: Always read the definition CSV before modifying a coverpoint template or script.** The definitions describe the expected behavior, the spec quotes, and the test methodology. Working without reading the definition leads to misinterpretation of what the coverpoint is trying to test.
+
+## Spec-First Debugging Flow
+
+When a coverpoint fails to reach 100% coverage (bins uncovered, hangs, or unexpected behavior), follow this flow **in order**:
+
+### 1. Read the definition CSV
+Look up the coverpoint in `working-testplans/csvs/Vector - V{ls,x,f}_custom_definitions.csv`. Understand:
+- What behavior is being tested
+- What spec section it references
+- What the expected outcome should be
+
+### 2. Check the RISC-V V spec
+The spec lives at `/home/jacassidy/cvw/addins/riscv-isa-manual/src/v-st-ext.adoc`. Quote the relevant section. Common sections:
+- §7 (Vector Loads and Stores)
+- §11.16 (vrgather)
+- §12 (Vector Reductions)
+- §13 (Vector Narrowing/Widening)
+- §3.4.2 (EMUL constraints)
+- §7.7 (Unit-stride Fault-Only-First Loads)
+
+### 3. Get a Sail trace
+```bash
+# Short trace to see what Sail does with the edge case
+DEBUG=True timeout 1s make coverage
+# Trace is at work/sail-rv64-max/build/rv64i/<Ext>/<test>.sig.log
+```
+
+### 4. Determine root cause
+| Symptom | Likely cause | Action |
+| --- | --- | --- |
+| Bin unhit, test runs fine | Test doesn't exercise the edge case | Fix test gen script |
+| Hang (infinite trap loop) | Illegal instruction or test-gen bug | Check trace for trap cause, compare against spec |
+| Sail produces wrong result | Possible Sail bug | Validate via Spike (see coverage workflow above), document in `simulator-issues.md` |
+| Template bin unreachable | Template defines impossible condition | Remove bin from template |
+
+### 5. If Sail bug suspected
+**Be extremely scrutinous.** Custom coverpoints test edge cases that are subtle situations — they may expose genuine simulator bugs. But they may also come from a poor reading of the spec. Before concluding Sail is wrong:
+
+1. Quote the exact spec text
+2. Show the Sail trace demonstrating the incorrect behavior
+3. Run the same test on Spike to get a second opinion
+4. Document with reproduction steps in `simulator-issues.md`:
+   - Instruction and operands
+   - SEW/LMUL/vl configuration
+   - Expected behavior (with spec quote)
+   - Actual Sail behavior (from trace)
+   - Spike behavior (from run)
+   - How to reproduce: exact isolate command, make commands, and trace inspection
+5. If the Sail bug directly prevents coverage bins from being hit AND cannot be worked around in the template/script, add the affected instructions to `unsupported_tests` in `vector-testgen-unpriv.py` with a comment referencing the issue — **only with user approval**
 
 ## Isolation
 
