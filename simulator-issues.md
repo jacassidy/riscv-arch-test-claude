@@ -26,6 +26,37 @@ Without all four elements, the issue is "suspected" not "confirmed."
 
 ---
 
+## Vector Tests: Traps Cause Immediate Sail FAILURE Exit
+
+**Applies to:** any test that defines `RVTEST_VECTOR` (all generated vector tests under `tests/rv{32,64}i/V{ls,x,f}*`).
+
+Vector test runs install an mtvec stub in `RVMODEL_BOOT` that, on any trap,
+writes `3` to HTIF `tohost`. This halts sail with a non-zero exit code — the
+run is reported as **FAILED**, not hung or passed-with-trap-logged.
+
+**Implication for debugging:** if a vector coverage run fails on sail, an
+unexpected trap (illegal instruction, misaligned access, etc.) is a prime
+suspect. Check the sail trace for a trap entry before assuming a signature
+mismatch. The normal trap-signature logging flow is bypassed for vector tests.
+
+**Source:**
+- `config/sail/sail-rv64-max/rvmodel_macros.h` — defines the `RVMODEL_BOOT`
+  stub (rv32/clang variants symlink to this). Gated on `#ifdef RVTEST_VECTOR`.
+- `tests/env/sail_macros.h` — must **not** `#undef RVMODEL_BOOT`, otherwise
+  the stub is stripped from the `.sig.elf` build path (and sig-generation
+  traps will hang for 30 min until `SAIL_TIMEOUT`).
+
+Both `.sig.elf` (built with `-DSIGNATURE`) and final `.elf` (built with
+`-DRVTEST_SELFCHECK`) inherit the stub.
+
+**Verified:** clean vector test → sail exit 0 `SUCCESS`; same test with
+`unimp` injected → sail exit 1 `FAILURE: 1`, build fails fast (~0s).
+
+**To disable:** remove or `#if 0`-out the `RVTEST_VECTOR` branch of
+`RVMODEL_BOOT` in `config/sail/sail-rv64-max/rvmodel_macros.h`.
+
+---
+
 ## Confirmed Issues
 
 ### 7. RV32 `vloxei64.v` (and all ei64 indexed LS) — Illegal instruction decode

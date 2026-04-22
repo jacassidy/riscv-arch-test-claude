@@ -8,14 +8,26 @@
 
 This test suite exists to verify the simulator (Sail), not just to achieve coverage numbers. When a coverage hole persists after reasonable debugging, ask: **is this a test bug or a simulator bug?** Symptoms of simulator issues include: signature mismatches on simple operations, hangs on valid instructions, inconsistent results across XLEN widths.
 
-**⚠️ NEVER add instructions to `unsupported_tests` during coverage work without explicit user approval.** `unsupported_tests` completely prevents test generation for an instruction — it is the absolute last resort. Coverage runs use Sail only; Sail-vs-Spike disagreements are invisible to coverage and are NOT a reason to skip an instruction. Build failures and hangs are almost always test-gen bugs, not Sail bugs. Fix the script first. Even for confirmed Sail bugs, prefer workarounds (guards in script, `MAXINDEXEEW`, skip specific combo) over `unsupported_tests`.
+**⚠️ NEVER add instructions to `unsupported_tests` during coverage work without explicit user approval.** `unsupported_tests` completely prevents test generation for an instruction — it is the absolute last resort. Coverage runs use Sail only; Sail-vs-Spike disagreements are invisible to coverage and are NOT a reason to skip an instruction. Build failures and hangs are almost always test-gen bugs OR slow tests, not Sail bugs. Fix the script first. Even for confirmed Sail bugs, prefer workarounds (guards in script, `MAXINDEXEEW`, skip specific combo) over `unsupported_tests`.
+
+## Diagnosis-First Hang Workflow (MANDATORY before unsupported_tests)
+
+Before declaring a "hang," follow this in order:
+
+1. **Time the test in isolation, no parallel load**: `time timeout 1800 /opt/riscv/bin/sail_riscv_sim --config <sail.json> --test-signature=/tmp/x.sig --signature-granularity 4 <elf>` — many "hangs" complete in 5-10 minutes. Tests with 800+ testcases CAN take 7+ minutes serially and 15-30 min under parallel CPU contention.
+2. **If it completes, it is NOT a hang** — it just needs a higher SAIL_TIMEOUT (currently 1800s = 30 min in `framework/src/act/build_plan.py:24`).
+3. **If it truly does not complete**, follow `guides/debugging-hangs.md` for trace-based diagnosis:
+   - `--inst-limit 50000 --trace-instr` to see where it gets stuck
+   - Check `mcause` for trap loops (no trap handler → infinite loop at default trap vector)
+   - Check vtype/LMUL/SEW alignment, register collisions
+4. **Only after exhausting test-gen and config issues** is it potentially a Sail bug. Then provide the 4-element evidence below.
 
 **To claim a confirmed Sail bug**, you must provide all four elements in `simulator-issues.md`:
 
-1. Exact reproduction command
-2. Trace quote from `--trace-all` output
-3. Analysis citing the RISC-V spec
-4. Comparison with correct behavior (e.g. RV64 vs RV32)
+1. Exact reproduction command (copy-pasteable, against minimal isolated ELF)
+2. Trace quote from `--trace-all` output showing the loop or invalid behavior
+3. Analysis citing the RISC-V spec (chapter/section)
+4. Comparison with correct behavior (e.g. RV64 vs RV32, or another simulator)
 
 Without trace evidence, label the issue "suspected." See `simulator-issues.md` issue #7 for the reference format.
 

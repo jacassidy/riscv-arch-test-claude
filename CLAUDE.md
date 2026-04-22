@@ -4,6 +4,7 @@
 
 ## Rules
 
+- **Never commit, only `git add`** — the user handles all commits. Stage files with `git add` after changes, but never run `git commit`.
 - Update the relevant guide immediately when corrected or when you learn something new.
 - Verify work before marking complete (run tests, check logs).
 - Read the guide for a task before reading raw code.
