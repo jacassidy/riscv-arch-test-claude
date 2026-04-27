@@ -31,6 +31,18 @@ Before declaring a "hang," follow this in order:
 
 Without trace evidence, label the issue "suspected." See `simulator-issues.md` issue #7 for the reference format.
 
+## Git: never use `git stash`
+
+**Do not run `git stash`, `git stash pop`, `git stash apply`, `git stash drop`, or any other `git stash` subcommand.**
+
+Stash has previously caused lost work. If you need a temporary snapshot of the working tree (e.g. to compare before/after generator output), use one of these instead:
+
+- Copy files or directories to `/tmp/` and diff against them there.
+- Create a scratch branch or commit (`git commit -m "wip"` on a throwaway branch) so the state stays in the reflog and on a named ref.
+- Use `git worktree add` for an isolated second checkout when you need to run the same command on a different commit.
+
+If a task seems to require stash, stop and ask the user first.
+
 ## Verification Rule
 
 **Always rerun coverage to verify a fix.** After editing a script or template, rebuild (`make clean && make vector-tests`) and rerun coverage (`make coverage` + `coverage_summary.py`). Do not read generated files, assembly, or framework code to guess whether a fix worked or whether a problem affects other instructions — the coverage report answers both questions faster and with certainty.

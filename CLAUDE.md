@@ -12,6 +12,8 @@
 - **Context refresh between problems**: When switching from one problem/coverpoint to another, STOP. Re-read the relevant guide files from the Task Routing table below. Then summarize your current context: what was just completed, what you're starting next, and what the current state is. This is where context drift happens — prevent it by resetting at every transition.
 - **File creation rule**: Any new guides, notes, scripts, or tools you create belong in this repo (`riscv-arch-test-claude`), NOT in the main working repo. Only files that are part of the upstream project (test generators, coverpoint scripts, configs) belong in the current working repo.
 - **Never edit generated files**: `coverpoints/unpriv/*_coverage.svh` and `tests/rv{32,64}i/**/*.S` are generated outputs. Always modify the source (templates in `generators/coverage/src/covergroupgen/templates/`, scripts in `generators/testgen/scripts/custom/`, or the CSV) and regenerate via `make vector-tests`.
+- **Normative-rule YAMLs (`coverpoints/norm/Vx.yaml` etc.) are owned by `tools/fill_vx_coverpoints.py` in THIS repo**, NOT by `(main repo) generators/ctp/norm_yaml_gen.py`. The main-repo `norm_yaml_gen.py` generates *new* YAML scaffolds from testplan CSVs into `coverpoints/norm/yaml/new/` and is unrelated to the CSV-driven `Vx.yaml` workflow. Symptoms of working on the wrong file: you see CSV column headers like `EFFEW8` / `cr_vl_lmul` / `cp_custom_*` ending up in coverpoint arrays — those are testplan-CSV column names, not coverpoints. STOP and switch to `tools/fill_vx_coverpoints.py`. See `guides/normative-rules-flow.md`.
+- **Don't follow the IDE "file was modified" reminder blindly**: that's just whatever file the user last touched, not necessarily the file relevant to the current task. Always verify by re-reading the routing table below.
 
 ## Task Routing
 
@@ -29,3 +31,5 @@ All paths below are relative to this repo (`riscv-arch-test-claude`) unless mark
 | Known pitfalls and bugs                | `scripts/claude-scripts/knowledge.md`                                                          |
 | Investigate coverage failure           | Definition CSV → RISC-V V spec (`/home/jacassidy/cvw/addins/riscv-isa-manual/src/v-st-ext.adoc`) → Sail trace (see `guides/custom-scripts/CLAUDE-coverage-workflow.md` "Spec-First Debugging Flow") |
 | Simulator bugs / unsupported tests     | `simulator-issues.md`                                                                          |
+| Add/edit a priv test (`tests/priv/<X>`) | `guides/architecture.md` "Privileged Test Generators" — choose Path A (CSV+cp_*.py) or Path B (handwritten Python via `priv/extensions/<X>.py` + `@add_priv_test_generator`) |
+| Modify/refresh `coverpoints/norm/Vx.yaml` (or sibling norm YAMLs) | `guides/normative-rules-flow.md` — the tool is `tools/fill_vx_coverpoints.py` in THIS repo. Run `make covergroupgen` first. Status of remaining holes: `guides/normative-rules-status.md`. |
