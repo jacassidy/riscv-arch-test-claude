@@ -21,6 +21,9 @@ make CONFIG_FILES=config/duts/cvw/cvw-rv64gc/test_config.yaml EXTENSIONS=I,M,A
 make lint / make lint-fix / make format
 ```
 
+**Never pass `--keep-going` / `-k` to any of these `make` invocations.** It hides
+failures that need to be addressed — let the build stop on the first error.
+
 ### Incremental Rebuild (no clean needed)
 
 After fixing a testgen script, regenerate and re-run coverage without `make clean`:
@@ -80,7 +83,7 @@ Use this when the test is a sequence of *scenarios* better expressed as straight
 - Driver: `(main repo) generators/testgen/src/testgen/generate/priv.py:generate_priv_test()` (one multi-XLEN test file via preprocessor — `xlen=0`).
 - Output: `tests/priv/<TestSuite>/<TestSuite>-00.S` (filename comes from `io/writer.py:write_test_file`, format `<testsuite>-{file_idx:02d}.S`).
 - Existing examples: `SmF.py`, `ExceptionsSm.py`, `InterruptsU.py`, `ExceptionsVf.py`.
-- Reserved registers (set by `generate_priv_test`): x0, x1/ra, x6, x7, x9, x16-x31. Allocate from the remaining pool via `test_data.int_regs.get_register(...)` / `get_registers(n, ...)` and return them at the end.
+- Reserved registers (set by `generate_priv_test`): x0, x1/ra, x6, x7, x9, x16-x31. Allocate from the remaining pool via `test_data.int_regs.get_register(...)` / `get_registers(n, ...)` and return them at the end. **Never hardcode an `x{N}` / `f{N}` literal** — see `guides/register-allocation.md` for the full rule and the corresponding vector-priv helpers.
 
 ### Decision rule
 

@@ -89,6 +89,9 @@ Mask values: `"ones"`, `"zeroes"`, `"vlmaxm1_ones"`, `"vlmaxd2p1_ones"`, `"cp_ma
 
 ## Pre-test assembly and scratch registers
 
+> **Reminder:** registers are **never** hardcoded — see `guides/register-allocation.md`. The mechanism below (`pre_test_scratch_regs` + `{s0}` / `{s1}` placeholders) is the *only* correct way to obtain scratch X-registers inside `pre_test_lines` / `pre_instruction_lines`. Likewise, vector / scalar operand registers come from `randomizeVectorInstructionData(...)` (read them back from `instruction_data`); never write `vd=N`, `vs1=N`, `rs1=N`, or a literal `x{N}` / `v{N}` / `f{N}` in emitted asm.
+
+
 If a custom script needs scratch scalar registers in `pre_test_lines` or `pre_instruction_lines`, it **must** request them via `pre_test_scratch_regs=N` and reference them as `{s0}`, `{s1}`, … inside f-string templates (escape the braces: `f"... x{{s0}} ..."`). `writeTest` allocates `N` unique X-registers via the centralized `scalar_registers_used` tracker and substitutes them into every line that contains a placeholder.
 
 **Why this matters**: `writeTest` calls `handleSignaturePointerConflict` after the custom script has already built its `pre_test_lines` strings. If the test's rs1/rs2 conflict with the default `sigReg` (x2), the resolver picks a new sigReg at random — which can be x31. A script that hand-picks a "safe" temp by scanning `range(31, 0, -1)` will land on x31 and silently clobber the signature pointer; the test then stores its signature to a tiny VLMAX value (e.g. `0x10`), faults, and hangs in the trap loop (no trap handler installed). This bug existed in `cp_custom_ffLS.py` and stalled coverage runs.
