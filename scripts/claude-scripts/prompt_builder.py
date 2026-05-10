@@ -76,7 +76,7 @@ def build(
         Prompt string for claude CLI
     """
     guide_path = CUSTOM_DIR / "CLAUDE-custom-testgen.md"
-    knowledge_path = CUSTOM_DIR / "claude-scripts" / "knowledge.md"
+    knowledge_path = REPO_ROOT.parent / "riscv-arch-test-claude" / "guides" / "pitfalls.md"
     script_path = CUSTOM_DIR / f"{coverpoint_name}.py"
 
     sections = []

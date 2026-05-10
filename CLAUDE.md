@@ -1,38 +1,21 @@
 # CLAUDE.md
 
-> **This is the Claude working files repo (`riscv-arch-test-claude`).** All new Claude-generated files (guides, scripts, tools, notes) must be created here, not in the main working repo. The main working repo is your current working directory — whichever checkout or worktree this CLAUDE.md is symlinked into. If you are in a git worktree, all edits target that worktree's directory, not the primary checkout.
+> Claude working files repo (`riscv-arch-test-claude`). Generated guides/scripts live here. Main working repo = current cwd (worktree). All edits target the worktree.
 
-## Rules
+`.claude/settings.json` (symlinked into every worktree) hard-blocks `git commit`/`stash`/`push` + writes to generated files / live CSVs. Hooks fire on prompt + Read/Edit/Write/MultiEdit; Sonnet routes target path against `guides/SHARD-INDEX.md` and injects `READ <shard>` reminders. **When you see one, open the shard with the Read tool BEFORE acting.**
 
-- **Never commit, only `git add`** — the user handles all commits. Stage files with `git add` after changes, but never run `git commit`.
-- Update the relevant guide immediately when corrected or when you learn something new.
-- Verify work before marking complete (run tests, check logs).
-- Read the guide for a task before reading raw code.
-- **NEVER use Agent with `subagent_type=Explore`** unless the user explicitly gives permission. Direct Grep/Glob/Read is fine.
-- **Context refresh between problems**: When switching from one problem/coverpoint to another, STOP. Re-read the relevant guide files from the Task Routing table below. Then summarize your current context: what was just completed, what you're starting next, and what the current state is. This is where context drift happens — prevent it by resetting at every transition.
-- **File creation rule**: Any new guides, notes, scripts, or tools you create belong in this repo (`riscv-arch-test-claude`), NOT in the main working repo. Only files that are part of the upstream project (test generators, coverpoint scripts, configs) belong in the current working repo.
-- **Never edit generated files**: `coverpoints/unpriv/*_coverage.svh` and `tests/rv{32,64}i/**/*.S` are generated outputs. Always modify the source (templates in `generators/coverage/src/covergroupgen/templates/`, scripts in `generators/testgen/scripts/custom/`, or the CSV) and regenerate via `make vector-tests`.
-- **Normative-rule YAMLs (`coverpoints/norm/Vx.yaml` etc.) are owned by `tools/fill_vx_coverpoints.py` in THIS repo**, NOT by `(main repo) generators/ctp/norm_yaml_gen.py`. The main-repo `norm_yaml_gen.py` generates *new* YAML scaffolds from testplan CSVs into `coverpoints/norm/yaml/new/` and is unrelated to the CSV-driven `Vx.yaml` workflow. Symptoms of working on the wrong file: you see CSV column headers like `EFFEW8` / `cr_vl_lmul` / `cp_custom_*` ending up in coverpoint arrays — those are testplan-CSV column names, not coverpoints. STOP and switch to `tools/fill_vx_coverpoints.py`. See `guides/normative-rules-flow.md`.
-- **Don't follow the IDE "file was modified" reminder blindly**: that's just whatever file the user last touched, not necessarily the file relevant to the current task. Always verify by re-reading the routing table below.
-- **NEVER hardcode register numbers in test generators or emitted assembly.** No `vd=8`, `rs1=7`, `la x2, ...`, `f"vsetvli x{30}, ..."`, etc. — for any register class (vector, scalar, or FP). Every register must be obtained from the framework's randomization helpers (`test_data.int_regs.get_registers(n)` / `fp_regs`, `randomizeVectorInstructionData(...)` without `vd=`/`vs1=`/`vs2=`/`rd=`/`rs1=`/`rs2=`, `pre_test_scratch_regs=N` with `{s0}`, `{s1}` placeholders, `pickPrivScratch(scalar_register_data)`) **within the legal constraints for that instruction** — EMUL alignment, no-overlap rules, framework-reserved set (`x0`–`x5`). The only acceptable literals are architecturally required ABI registers (`a0` for an ABI-specified argument, `x0` for the zero register, `x2`/`common.sigReg` as the framework signature pointer) — and even those should come from documented constants, not magic numbers. Hardcoded registers shrink the randomization search space, mask real bugs, and create false-pass tests where the same registers always work. **If you find yourself typing a literal `x{N}`, `v{N}`, or `f{N}` in emitted asm, stop and route it through the randomizer.** See `guides/register-allocation.md`.
-- **Never pass `--keep-going` (or `-k`) to `make`**: it suppresses failures that need to be fixed. Let the build stop on the first error so the real problem is visible. This applies to every `make` invocation (`make vector-tests`, `make coverage`, `make covergroupgen`, etc.). **If your instinct says "just add -k to get past this failure", that instinct is itself the signal that you are facing an issue requiring IMMEDIATE root-cause investigation — STOP, deep-dive the failure, and only resume once the underlying bug is fixed.** Do not defer the failure for later, do not mark work complete with `-k` results, do not "see what else fails" by passing `-k`. A wrapper at `hooks/make` enforces this — activate by prepending `hooks/` to `PATH` (see `hooks/README.md`).
+## Hard rules
 
-## Task Routing
+- **Never `git commit`/`stash`/`push`** — user owns commits. `git add` only.
+- **Never edit generated files**: `coverpoints/{unpriv,priv}/*_coverage.svh`, `tests/rv{32,64}i/**/*.S`. Edit source (template/script/CSV) → `make vector-tests`.
+- **Never pass `-k`/`--keep-going` to `make`.** `hooks/make` wrapper enforces.
+- **Never hardcode register numbers** (`x{N}/v{N}/f{N}`). See `guides/register-allocation.md`.
+- **Re-read shard reminders on task switch.** Context drift = #1 mistake source.
+- **`.md` style**: bullets > prose; delete as you edit; one source of truth per fact.
 
-All paths below are relative to this repo (`riscv-arch-test-claude`) unless marked `(main repo)`.
+## Pointers
 
-| Task                                   | Read                                                                                           |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Fix coverage holes                     | `guides/custom-scripts/CLAUDE-coverage-workflow.md`                                            |
-| Write/edit CSV cells                   | `guides/csv-editing.md`                                                                        |
-| Write/fix cp*custom*\*.py script       | **Definition CSV first** (`working-testplans/csvs/Vector - V{ls,x,f}_custom_definitions.csv`) then `guides/custom-scripts/GUIDE.md` |
-| Modify/create coverpoint template      | **Definition CSV first** (`working-testplans/csvs/Vector - V{ls,x,f}_custom_definitions.csv`) then `guides/coverpoint-templates.md` then `(main repo) generators/coverage/src/covergroupgen/templates/` |
-| Look up vector encodings/FP hex values | `guides/vector-reference.md` (grep, don't read whole file)                                     |
-| Project structure, build commands      | `guides/architecture.md`                                                                       |
-| Debug a hanging test                   | `guides/debugging-hangs.md`                                                                    |
-| Known pitfalls and bugs                | `scripts/claude-scripts/knowledge.md`                                                          |
-| Investigate coverage failure           | Definition CSV → RISC-V V spec (`/home/jacassidy/cvw/addins/riscv-isa-manual/src/v-st-ext.adoc`) → Sail trace (see `guides/custom-scripts/CLAUDE-coverage-workflow.md` "Spec-First Debugging Flow") |
-| Simulator bugs / unsupported tests     | `simulator-issues.md`                                                                          |
-| Add/edit a priv test (`tests/priv/<X>`) | `guides/architecture.md` "Privileged Test Generators" — choose Path A (CSV+cp_*.py) or Path B (handwritten Python via `priv/extensions/<X>.py` + `@add_priv_test_generator`) |
-| Modify/refresh `coverpoints/norm/Vx.yaml` (or sibling norm YAMLs) | `guides/normative-rules-flow.md` — the tool is `tools/fill_vx_coverpoints.py` in THIS repo. Run `make covergroupgen` first. Status of remaining holes: `guides/normative-rules-status.md`. |
-| Pick a register (any register, in any generator) | `guides/register-allocation.md` — registers are **never** hardcoded; they must be drawn from the randomizer within the instruction's legal constraints (EMUL alignment, no-overlap, reserved set). Read this before emitting any line that mentions `x?`, `v?`, or `f?`. |
+- Shard router table: `guides/SHARD-INDEX.md` (Sonnet reads — you don't, unless hook fails).
+- Definition CSVs: `working-testplans/csvs/Vector - V{ls,x,f}_custom_definitions.csv`.
+- RISC-V V spec: `/home/jacassidy/cvw/addins/riscv-isa-manual/src/v-st-ext.adoc`.
+- `memory/` — state files only (e.g. `progress.json`). Prose → `guides/`.

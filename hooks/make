@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Wrapper that refuses any `make` invocation containing -k / --keep-going.
+#
+# Use it by prepending its directory to PATH:
+#     export PATH="<repo>/hooks:$PATH"
+# or by symlinking it into ~/.local/bin/make.
+#
+# Per CLAUDE.md: if you reach for -k, that itself signals an issue you must
+# stop and fix, not defer. Suppressing failures hides bugs that need to be
+# resolved IMMEDIATELY.
+
+set -u
+
+die() {
+  cat >&2 <<EOF
+make: refusing $1.
+
+Per CLAUDE.md (no-keep-going rule): the urge to pass -k is itself a signal
+that a failure needs IMMEDIATE root-cause investigation. Do not suppress
+build failures. Stop, deep-dive the failure, fix it, then re-run without -k.
+EOF
+  exit 2
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --keep-going) die "$arg" ;;
+    -k) die "$arg" ;;
+    --) break ;;
+    -[!-]*)
+      # Combined short options like -knj4: detect a 'k' anywhere after the dash
+      # but stop at '=' (long-option-like values won't start with -[!-]).
+      if [[ "${arg#-}" == *k* ]]; then
+        die "$arg (combined option contains -k)"
+      fi
+      ;;
+  esac
+done
+
+exec /usr/bin/make "$@"
