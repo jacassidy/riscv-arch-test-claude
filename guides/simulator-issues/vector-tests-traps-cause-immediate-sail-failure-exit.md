@@ -18,3 +18,6 @@ Both `.sig.elf` (`-DSIGNATURE`) and final `.elf` (`-DRVTEST_SELFCHECK`) inherit 
 **To disable:** remove or `#if 0`-out `RVTEST_VECTOR` branch of `RVMODEL_BOOT` in `config/sail/sail-rv64-max/rvmodel_macros.h`.
 
 ---
+
+
+**Scope:** vector tests only (`RVTEST_VECTOR` defined). Non-vector test trap (hang or FAILED) → see `guides/debugging-hangs/`.

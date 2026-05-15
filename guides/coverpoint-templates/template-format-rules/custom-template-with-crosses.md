@@ -27,3 +27,7 @@
 
     //// end cp_custom_vexample////////////////////////////////////////////////
 ```
+
+
+
+> **Constraint:** Custom template must NOT redeclare coverpoints owned by CSV columns (e.g. `cp_rd`, `cp_rs1`, `cp_imm`). Cross those CSV-owned coverpoints by name only — define no new coverpoint with same name.

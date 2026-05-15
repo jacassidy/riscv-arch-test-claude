@@ -17,3 +17,12 @@ def make(test, sew):
 ```
 
 `@register` decorator **required**. Must match **CSV column name** in `testplans/`.
+
+## Contract
+
+`make` **must** call for every test emitted:
+- `writeTest(...)` — emit test case
+- `incrementBasetestCount()` or `incrementLengthtestCount()` — advance counter
+- `vsAddressCount()` or `vsAddressCount("length")` — register address slot
+
+No return value. Missing any of these = silent corruption (wrong test counts / address slots).

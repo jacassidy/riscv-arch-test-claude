@@ -19,9 +19,13 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 REPO = Path(os.environ.get("CLAUDE_PROJECT_DIR", Path(__file__).resolve().parent.parent.parent))
+# Canonical claude-files repo (where memory MUST land, never in worktrees).
+# route.py is symlinked into every worktree; .resolve() follows symlink to real path.
+CANONICAL_REPO = Path(__file__).resolve().parent.parent.parent
 INDEX_PATH = REPO / "guides" / "SHARD-INDEX.md"
 CACHE_PATH = Path("/tmp/route-cache.json")
 SESSION_DIR = Path("/tmp/route-sessions")
@@ -29,6 +33,34 @@ SESSION_TTL = 24 * 3600  # 1 day
 CACHE_TTL = 3600  # 1 hour
 SONNET_TIMEOUT = 25  # seconds (Claude Code kills long hooks)
 REMINDER_PREFIX = "[route.py] READ"
+
+
+def _branch_slug() -> str:
+    """Branch name of REPO (worktree), sanitized for filesystem. Falls back to 'unknown'."""
+    try:
+        out = subprocess.check_output(
+            ["git", "-C", str(REPO), "branch", "--show-current"],
+            stderr=subprocess.DEVNULL, timeout=2,
+        ).decode().strip()
+        if out:
+            return re.sub(r"[^A-Za-z0-9._-]+", "_", out)
+    except Exception:
+        pass
+    return "unknown"
+
+
+# Persistent paired log + queues — always under CANONICAL_REPO/memory/<branch>/,
+# never in the worktree. Each worktree gets its own subdir keyed by branch.
+MEMORY_DIR = CANONICAL_REPO / "memory" / _branch_slug()
+MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+ROUTE_LOG = MEMORY_DIR / "route-log.jsonl"
+AUDIT_QUEUE = MEMORY_DIR / "audit-queue.jsonl"
+PATCH_QUEUE = MEMORY_DIR / "route-patches.jsonl"
+ROUTE_LOG_MAX = 10 * 1024 * 1024  # 10 MB rotation
+AUDIT_WINDOW = 24 * 3600
+AUDIT_LARGE_THRESHOLD = 3      # ≥3 large-severity feedbacks in window → nudge
+AUDIT_NEG_RATIO = 0.3          # ≥30% useless+wrong over ≥10 graded → nudge
+AUDIT_NEG_MIN = 10
 
 # Prompt-keyword → shard-dir reminders (small set, hook-cheap).
 PROMPT_RULES = [
@@ -90,6 +122,7 @@ def handle_prompt():
     if hits:
         injected.update(new_targets)
         save_session(sid, injected)
+        _log_request(sid, "prompt", prompt, new_targets, sonnet_ok=True)
         print(json.dumps({
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
@@ -155,6 +188,59 @@ def prune_sessions():
                 f.unlink()
         except Exception:
             pass
+
+
+def _append_jsonl(path: Path, row: dict):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"[route.py] jsonl append err {path}: {e}", file=sys.stderr)
+
+
+def _rotate_log(path: Path):
+    try:
+        if path.exists() and path.stat().st_size > ROUTE_LOG_MAX:
+            backup = path.with_suffix(path.suffix + ".1")
+            if backup.exists():
+                backup.unlink()
+            path.rename(backup)
+    except Exception:
+        pass
+
+
+def _log_request(sid: str, mode: str, trigger: str, shards: list, sonnet_ok: bool) -> str:
+    rid = uuid.uuid4().hex[:12]
+    _rotate_log(ROUTE_LOG)
+    _append_jsonl(ROUTE_LOG, {
+        "type": "request",
+        "ts": time.time(),
+        "session_id": sid,
+        "request_id": rid,
+        "mode": mode,
+        "trigger": trigger[:300],
+        "shards": shards,
+        "sonnet_ok": bool(sonnet_ok),
+    })
+    return rid
+
+
+def _iter_jsonl(path: Path):
+    if not path.exists():
+        return
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    yield json.loads(line)
+                except Exception:
+                    continue
+    except Exception:
+        return
 
 
 def index_sha():
@@ -240,11 +326,13 @@ def handle_tool():
     cache = load_cache()
     entry = cache.get(cache_key)
     now = time.time()
+    sonnet_ok = True
     if entry and now - entry.get("t", 0) < CACHE_TTL:
         shards = entry.get("shards", [])
     else:
         shards = call_sonnet(path, tool)
         if shards is None:
+            sonnet_ok = False
             shards = fallback_shards(path)
         cache[cache_key] = {"t": now, "shards": shards}
         # Prune old entries
@@ -252,6 +340,7 @@ def handle_tool():
         save_cache(cache)
 
     if not shards:
+        _log_request(sid, "tool", f"{tool}:{path}", [], sonnet_ok)
         return
 
     injected = load_session(sid)
@@ -261,6 +350,7 @@ def handle_tool():
     injected.update(new_shards)
     save_session(sid, injected)
     prune_sessions()
+    _log_request(sid, "tool", f"{tool}:{path}", new_shards, sonnet_ok)
 
     hits = [reminder(s, "shard router pick") for s in new_shards]
     print(json.dumps({
@@ -327,24 +417,285 @@ def _call_sonnet_raw(prompt, timeout=SONNET_TIMEOUT):
         return ""
 
 
+def _log_patch_outcome(status, shard_rel, note, **extra):
+    """Always log every patch_pass outcome to ROUTE_LOG for visibility."""
+    row = {
+        "type": "patch_outcome",
+        "ts": time.time(),
+        "status": status,
+        "shard": shard_rel,
+        "note": (note or "")[:200],
+    }
+    row.update(extra)
+    _append_jsonl(ROUTE_LOG, row)
+
+
+def _resolve_shard_target(shard_rel):
+    """Map shard path to a concrete file. Dir → ask Sonnet to pick best .md.
+
+    Returns (Path|None, status_str). status_str only used when None.
+    """
+    target = REPO / shard_rel
+    if not target.exists():
+        return None, "missing_target"
+    if target.is_file():
+        return target, ""
+    if not target.is_dir():
+        return None, "not_file_or_dir"
+    md_files = sorted([p for p in target.rglob("*.md") if p.is_file()])
+    if not md_files:
+        return None, "dir_no_md"
+    if len(md_files) == 1:
+        return md_files[0], ""
+    return md_files, "dir_multi"  # caller picks
+
+
+def _patch_pass():
+    """Drain up to N entries from PATCH_QUEUE; ask Sonnet for a focused shard edit each.
+
+    Path-allowlisted to guides/**. Successful patches consumed from queue;
+    failures kept for retry next session. Hard time-budgeted.
+    """
+    if not PATCH_QUEUE.exists():
+        return
+    try:
+        lines = [l for l in PATCH_QUEUE.read_text().splitlines() if l.strip()]
+    except Exception:
+        return
+    if not lines:
+        return
+    entries = [json.loads(l) for l in lines if l.startswith("{")]
+    take, rest = entries[:3], entries[3:]
+    kept = list(rest)
+    budget_end = time.time() + 8.0
+    for e in take:
+        if time.time() > budget_end:
+            kept.append(e)
+            _log_patch_outcome("budget_exhausted", e.get("shard", ""), e.get("note", ""))
+            continue
+        shard_rel = (e.get("shard") or "").strip()
+        note = (e.get("note") or "").strip()
+        verdict = (e.get("verdict") or "").strip()
+        if (not shard_rel or ".." in shard_rel
+                or not shard_rel.startswith("guides/")):
+            _log_patch_outcome("bad_path", shard_rel, note)
+            continue  # drop bad entry
+        resolved, status = _resolve_shard_target(shard_rel)
+        if resolved is None:
+            _log_patch_outcome(status, shard_rel, note)
+            continue  # drop bad entry
+        # Dir with multiple .md → ask Sonnet to pick file.
+        if isinstance(resolved, list):
+            md_files = resolved
+            rel_names = [str(p.relative_to(REPO)) for p in md_files]
+            pick_prompt = (
+                "Shard feedback targets a directory. Pick ONE file from the list "
+                "where this feedback should be addressed. Output STRICT JSON: "
+                "{\"file\": \"<one path exactly from list>\"}. If none fit, {}.\n\n"
+                f"FEEDBACK verdict={verdict}; note={note}\n\n"
+                "FILES:\n" + "\n".join(rel_names) + "\n"
+            )
+            pick_out = _call_sonnet_raw(pick_prompt, timeout=10)
+            chosen = None
+            if pick_out:
+                pick_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", pick_out).strip()
+                m = re.search(r"\{.*\}", pick_out, re.DOTALL)
+                if m:
+                    try:
+                        pj = json.loads(m.group(0))
+                        f = (pj.get("file") or "").strip()
+                        if f in rel_names:
+                            chosen = REPO / f
+                    except Exception:
+                        pass
+            if chosen is None:
+                kept.append(e)
+                _log_patch_outcome("dir_pick_fail", shard_rel, note)
+                continue
+            target = chosen
+            shard_rel = str(chosen.relative_to(REPO))
+        else:
+            target = resolved
+        try:
+            cur = target.read_text()
+        except Exception as ex:
+            kept.append(e)
+            _log_patch_outcome("read_err", shard_rel, note, err=str(ex))
+            continue
+        prompt = (
+            "You receive feedback that a shard gave wrong or partial guidance. "
+            "Propose a MINIMAL edit. Output STRICT JSON only: "
+            "{\"replace\": \"<exact existing substring>\", "
+            "\"with\": \"<replacement>\"} OR "
+            "{\"append\": \"<lines to append>\"}. "
+            "Caveman-ultra style. No headings. If unsure, output {}.\n\n"
+            f"SHARD PATH: {shard_rel}\n"
+            f"FEEDBACK verdict={verdict}; note={note}\n\n"
+            "--- SHARD CONTENT ---\n"
+            f"{cur}\n"
+        )
+        out = _call_sonnet_raw(prompt, timeout=10)
+        if not out:
+            kept.append(e)
+            _log_patch_outcome("sonnet_empty", shard_rel, note)
+            continue
+        out = re.sub(r"^```(?:json)?\s*|\s*```$", "", out).strip()
+        m = re.search(r"\{.*\}", out, re.DOTALL)
+        if not m:
+            kept.append(e)
+            _log_patch_outcome("no_json", shard_rel, note, raw=out[:200])
+            continue
+        try:
+            pick = json.loads(m.group(0))
+        except Exception as ex:
+            kept.append(e)
+            _log_patch_outcome("parse_fail", shard_rel, note, err=str(ex))
+            continue
+        if not pick:
+            _log_patch_outcome("sonnet_unsure", shard_rel, note)
+            continue  # drop — sonnet said {}
+        applied = False
+        reason = "unknown"
+        try:
+            if "replace" in pick and "with" in pick:
+                if pick["replace"] in cur:
+                    new = cur.replace(pick["replace"], pick["with"], 1)
+                    target.write_text(new)
+                    applied = True
+                else:
+                    reason = "replace_not_found"
+            elif pick.get("append"):
+                sep = "" if cur.endswith("\n\n") else ("\n" if cur.endswith("\n") else "\n\n")
+                target.write_text(cur + sep + pick["append"].rstrip() + "\n")
+                applied = True
+            else:
+                reason = "no_action_keys"
+        except Exception as ex:
+            print(f"[route.py] patch apply err: {ex}", file=sys.stderr)
+            kept.append(e)
+            _log_patch_outcome("apply_err", shard_rel, note, err=str(ex))
+            continue
+        if applied:
+            _append_jsonl(ROUTE_LOG, {
+                "type": "patch_applied",
+                "ts": time.time(),
+                "shard": shard_rel,
+                "note": note[:200],
+            })
+        else:
+            kept.append(e)
+            _log_patch_outcome("not_applied", shard_rel, note, reason=reason)
+    # Rewrite queue with survivors.
+    try:
+        PATCH_QUEUE.write_text("".join(json.dumps(e) + "\n" for e in kept))
+    except Exception:
+        pass
+
+
+def _audit_nudge():
+    """Emit stderr nudge if recent feedback skews negative."""
+    cutoff = time.time() - AUDIT_WINDOW
+    large = 0
+    graded = 0
+    negative = 0
+    for row in _iter_jsonl(ROUTE_LOG):
+        if row.get("type") != "feedback":
+            continue
+        if row.get("ts", 0) < cutoff:
+            continue
+        graded += 1
+        sev = row.get("severity", "none")
+        verdict = row.get("verdict", "")
+        if sev == "large":
+            large += 1
+        if verdict in ("useless", "wrong"):
+            negative += 1
+    ratio = (negative / graded) if graded else 0.0
+    nudge = None
+    if large >= AUDIT_LARGE_THRESHOLD:
+        nudge = f"[route.py] AUDIT RECOMMENDED — {large} large-severity feedbacks in 24h. Run opus per guides/REPO-AUDIT.md."
+    elif graded >= AUDIT_NEG_MIN and ratio >= AUDIT_NEG_RATIO:
+        nudge = (
+            f"[route.py] AUDIT RECOMMENDED — {negative}/{graded} "
+            f"({ratio:.0%}) negative feedbacks in 24h. Run opus per guides/REPO-AUDIT.md."
+        )
+    if nudge:
+        print(nudge, file=sys.stderr)
+    # Surface stuck patch queue depth.
+    try:
+        if PATCH_QUEUE.exists():
+            depth = sum(1 for l in PATCH_QUEUE.read_text().splitlines() if l.strip())
+            if depth >= 3:
+                print(f"[route.py] patch queue depth={depth} — check memory/<branch>/route-log.jsonl for patch_outcome rows.", file=sys.stderr)
+    except Exception:
+        pass
+
+
 def handle_stop():
     data = json.load(sys.stdin)
     if data.get("stop_hook_active"):
         return  # never recurse
+    # Always-run maintenance passes (independent of learning).
+    _patch_pass()
+    _audit_nudge()
     transcript = data.get("transcript_path", "")
     tail = _read_transcript_tail(transcript)
     if not tail or len(tail) < 200:
         return  # too short to have learned anything
+    sid = data.get("session_id", "") or ""
+    injected_shards = sorted(load_session(sid)) if sid else []
 
-    # Stage 1: did we learn anything worth saving?
+    # Stage 1: did we learn anything worth saving? Also (lightweight, same
+    # Sonnet call) grade which injected shards were actually needed this
+    # session. GOAL of the shard-utility grade: make future shard injection
+    # more efficient. The router only improves if it learns which shards
+    # earned their slot. 'useless' (info NOT needed) is a first-class helpful
+    # signal — it tells the router/auditor to inject less aggressively for
+    # similar triggers. 'good' is NOT a polite default.
+    # Default learned = false. No fabrication. Require evidence quote that substring-matches transcript.
+    shard_list_block = (
+        "\n".join(f"- {s}" for s in injected_shards) if injected_shards else "(none)"
+    )
     p1 = (
-        "Below is the last assistant response(s) from a coding agent working on "
-        "the riscv-arch-test-claude repo. Did the agent discover any NEW durable "
-        "knowledge (a non-obvious gotcha, hidden constraint, project convention, "
-        "tool quirk, bug+fix) that future sessions should know? Routine task "
-        "completion, code edits, and obvious facts do NOT count.\n\n"
-        "Output STRICT JSON only: {\"learned\": true|false, \"summary\": \"<1-3 caveman-ultra lines>\"}.\n"
-        "If false, summary = \"\".\n\n"
+        "You grade a coding-agent transcript from the riscv-arch-test-claude repo. "
+        "DEFAULT verdict is learned:false. Set learned:true ONLY if one of these holds:\n"
+        " (a) Agent hit a NON-OBVIOUS gotcha, hidden constraint, undocumented project "
+        "convention, tool quirk, or bug+fix that — had it been documented in a shard up "
+        "front — would have measurably saved time or tool calls THIS session.\n"
+        " (b) Agent IMPLEMENTED something new this session (new script, new hook, new "
+        "generator, new make target, new CSV column, new helper, new shard, new "
+        "workflow/convention) that future sessions will need to know about — i.e. its "
+        "existence/usage/contract is not yet documented in any shard. The 'learning' is "
+        "the new artifact + how to use it.\n\n"
+        "Do NOT manufacture content to fill the slot. The following are ALWAYS "
+        "learned:false:\n"
+        " - Routine task completion against an existing well-documented workflow.\n"
+        " - Edits to existing code that don't change its contract or introduce new usage.\n"
+        " - Restating facts already in CLAUDE.md / SHARD-INDEX / any guide.\n"
+        " - Generic 'best practices' or inferred advice not grounded in a concrete "
+        "   surprise or new artifact from this session.\n"
+        " - Speculation about future sessions.\n\n"
+        "If learned:true, you MUST quote an exact substring from the transcript as "
+        "evidence — for (a) the surprise (error message, wrong assumption corrected, "
+        "discovered constraint); for (b) the creation/use of the new artifact (file "
+        "path being written, new function defined, new command run).\n\n"
+        "ALSO grade the injected shards listed below. GOAL: tune future shard "
+        "injection. For each shard, pick exactly one verdict:\n"
+        "  useless — topic never came up / info not needed this session "
+        "(HELPFUL signal — do not avoid it to be polite)\n"
+        "  good    — transcript shows agent used or relied on the shard's content\n"
+        "  partial — relevant but missing/outdated detail caused friction\n"
+        "  wrong   — shard content contradicted reality and misled the agent\n"
+        "If no shards were injected, return an empty shard_utility list.\n\n"
+        "Output STRICT JSON only: "
+        "{\"learned\": true|false, \"summary\": \"<1-3 caveman-ultra lines>\", "
+        "\"evidence\": \"<exact substring from transcript, or empty>\", "
+        "\"shard_utility\": [{\"shard\":\"guides/...\",\"verdict\":\"useless|good|partial|wrong\","
+        "\"note\":\"<one short line>\"}, ...]}.\n"
+        "If learned:false, summary and evidence MUST both be empty strings. "
+        "shard_utility is independent of learned and should be filled whenever "
+        "shards were injected.\n\n"
+        f"INJECTED SHARDS THIS SESSION:\n{shard_list_block}\n\n"
         f"---\n{tail}\n"
     )
     out1 = _call_sonnet_raw(p1)
@@ -358,22 +709,77 @@ def handle_stop():
         verdict = json.loads(m.group(0))
     except Exception:
         return
+    # Record shard-utility feedback rows regardless of learned outcome.
+    util = verdict.get("shard_utility") or []
+    if isinstance(util, list) and injected_shards:
+        valid_v = {"useless", "good", "partial", "wrong"}
+        injected_set = set(injected_shards)
+        for g in util:
+            if not isinstance(g, dict):
+                continue
+            shard_rel = (g.get("shard") or "").strip()
+            v = (g.get("verdict") or "").strip().lower()
+            note = (g.get("note") or "").strip()[:200]
+            if shard_rel not in injected_set or v not in valid_v:
+                continue
+            severity = "small" if v in ("partial", "wrong") else "none"
+            _append_jsonl(ROUTE_LOG, {
+                "type": "feedback",
+                "ts": time.time(),
+                "session_id": sid,
+                "shard": shard_rel,
+                "verdict": v,
+                "severity": severity,
+                "note": note,
+                "source": "auto-grade",
+            })
+            if v in ("partial", "wrong"):
+                try:
+                    with open(PATCH_QUEUE, "a") as f:
+                        f.write(json.dumps({
+                            "shard": shard_rel,
+                            "verdict": v,
+                            "severity": severity,
+                            "note": note,
+                        }) + "\n")
+                except Exception as ex:
+                    print(f"[route.py] patch enqueue err: {ex}", file=sys.stderr)
     if not verdict.get("learned") or not verdict.get("summary"):
         return
     summary = verdict["summary"].strip()
+    evidence = (verdict.get("evidence") or "").strip()
+    # Fabrication guard: evidence must be a substring of the transcript tail.
+    if not evidence or evidence not in tail:
+        try:
+            with open(LEARN_LOG, "a") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} FABRICATION_DROP: {summary[:120]}\n")
+        except Exception:
+            pass
+        return
 
-    # Stage 2: pick target shard + write caveman-ultra append.
+    # Stage 2: append to existing shard OR create new shard.
     if not INDEX_PATH.exists():
         return
     index_text = INDEX_PATH.read_text()
     p2 = (
-        "Pick the BEST existing shard from SHARD-INDEX below to append this new "
-        "knowledge to. Output STRICT JSON only: {\"shard\": \"guides/...md\", "
-        "\"append\": \"<caveman-ultra lines, no headings, append-ready>\"}. "
+        "Decide where to record this new knowledge from a coding-agent session. Two options:\n"
+        " A. APPEND to an existing shard from SHARD-INDEX (PREFERRED when a topically "
+        "    matching shard exists AND it is still short — shards aim for <50 lines).\n"
+        " B. CREATE a new shard (ONLY when no existing shard fits topically, OR the "
+        "    best-fit shard is already long and adding here would bloat it past ~50 lines, "
+        "    OR the knowledge is a brand-new artifact deserving its own entry point).\n\n"
+        "Output STRICT JSON only. Schema:\n"
+        " - Append:  {\"action\":\"append\", \"shard\":\"guides/...md\", \"append\":\"<caveman-ultra body>\"}\n"
+        " - Create:  {\"action\":\"create\", \"shard\":\"guides/<dir>/<slug>.md\", "
+        "\"content\":\"<full new-shard body, caveman-ultra, no top-level # heading>\", "
+        "\"index_section\":\"## <exact section header from SHARD-INDEX>\", "
+        "\"index_row\":\"| guides/<dir>/<slug>.md | <When-column trigger phrase> |\"}\n"
+        " - Skip:    {\"action\":\"skip\"}\n\n"
         "Caveman-ultra = arrows for causality, drop articles/conjunctions, "
         "abbreviate (DB/auth/cfg/req/res/fn/impl), one word when possible. "
-        "Code symbols and error strings stay exact. Max 6 lines. "
-        "If no shard fits well, output {\"shard\": \"\", \"append\": \"\"}.\n\n"
+        "Code symbols, file paths, and error strings stay exact. Append body max 6 lines. "
+        "New-shard content max 40 lines. index_section MUST match a header that appears "
+        "verbatim in SHARD-INDEX below.\n\n"
         f"NEW KNOWLEDGE:\n{summary}\n\n"
         f"---\n{index_text}\n"
     )
@@ -388,24 +794,63 @@ def handle_stop():
         pick = json.loads(m2.group(0))
     except Exception:
         return
+    action = (pick.get("action") or "").strip().lower()
     shard_rel = (pick.get("shard") or "").strip()
-    append = (pick.get("append") or "").strip()
-    if not shard_rel or not append:
-        return
-    # Path safety: must be under guides/, must exist.
-    if ".." in shard_rel or not shard_rel.startswith("guides/"):
-        return
-    target = REPO / shard_rel
-    if not target.exists() or not target.is_file():
-        return
-    try:
-        cur = target.read_text()
-        sep = "" if cur.endswith("\n\n") else ("\n" if cur.endswith("\n") else "\n\n")
-        target.write_text(cur + sep + append.rstrip() + "\n")
-        with open(LEARN_LOG, "a") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {shard_rel}: {summary[:120]}\n")
-    except Exception as e:
-        print(f"[route.py] shard append err: {e}", file=sys.stderr)
+    if action == "append":
+        append = (pick.get("append") or "").strip()
+        if not shard_rel or not append:
+            return
+        if ".." in shard_rel or not shard_rel.startswith("guides/"):
+            return
+        target = REPO / shard_rel
+        if not target.exists() or not target.is_file():
+            return
+        try:
+            cur = target.read_text()
+            sep = "" if cur.endswith("\n\n") else ("\n" if cur.endswith("\n") else "\n\n")
+            target.write_text(cur + sep + append.rstrip() + "\n")
+            with open(LEARN_LOG, "a") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {shard_rel}: {summary[:120]}\n")
+        except Exception as e:
+            print(f"[route.py] shard append err: {e}", file=sys.stderr)
+    elif action == "create":
+        content = (pick.get("content") or "").strip()
+        index_section = (pick.get("index_section") or "").strip()
+        index_row = (pick.get("index_row") or "").strip()
+        if not (shard_rel and content and index_section and index_row):
+            return
+        if ".." in shard_rel or not shard_rel.startswith("guides/") or not shard_rel.endswith(".md"):
+            return
+        target = REPO / shard_rel
+        if target.exists():
+            return  # refuse to clobber
+        # index_section must appear verbatim as a line in index_text.
+        idx_lines = index_text.splitlines()
+        try:
+            sec_idx = idx_lines.index(index_section)
+        except ValueError:
+            return
+        # index_row sanity: markdown table row referencing the new shard.
+        if not (index_row.startswith("|") and shard_rel in index_row and index_row.endswith("|")):
+            return
+        # Find end of this section's table (next "## " header or EOF).
+        insert_at = len(idx_lines)
+        for i in range(sec_idx + 1, len(idx_lines)):
+            if idx_lines[i].startswith("## "):
+                insert_at = i
+                break
+        # Walk back past trailing blank lines in this section so row sits with the table.
+        while insert_at > sec_idx + 1 and idx_lines[insert_at - 1].strip() == "":
+            insert_at -= 1
+        idx_lines.insert(insert_at, index_row)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content.rstrip() + "\n")
+            INDEX_PATH.write_text("\n".join(idx_lines) + ("\n" if index_text.endswith("\n") else ""))
+            with open(LEARN_LOG, "a") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} CREATE {shard_rel}: {summary[:120]}\n")
+        except Exception as e:
+            print(f"[route.py] shard create err: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

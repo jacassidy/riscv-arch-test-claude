@@ -3,3 +3,21 @@ __pycache__/
 *.swp
 *~
 .DS_Store
+
+# route.py paired log + audit queues (per-clone state, never commit).
+# Each worktree writes into memory/<branch>/ within this canonical repo.
+memory/*/route-log.jsonl
+memory/*/route-log.jsonl.1
+memory/*/audit-queue.jsonl
+memory/*/route-patches.jsonl
+memory/*/audit-report-*.md
+memory/*/audit-queue-*.archive.jsonl
+memory/*/audit-patches/
+# Legacy top-level paths (pre-branch-subdir migration).
+memory/route-log.jsonl
+memory/route-log.jsonl.1
+memory/audit-queue.jsonl
+memory/route-patches.jsonl
+memory/audit-report-*.md
+memory/audit-queue-*.archive.jsonl
+memory/audit-patches/

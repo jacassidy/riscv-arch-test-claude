@@ -22,3 +22,11 @@ Test framework no install trap handlers. Any exception (illegal instr, misaligne
 ### 4. vmv.v.i before vsetvli (fixed)
 
 Mask init emitted before `vsetvli` — hung when `vtype.vill=1` after reset. Fixed: now emits after `prepBaseV`. See `guides/pitfalls.md` § "vmv.v.i v0 Before vsetvli".
+
+### 5. mtvec=0 → Sail illegal-trap cascade
+
+When `mtvec` not explicitly set (default=0) and illegal instruction fires, trap vector = 0x0 → likely another illegal instr → infinite trap loop. Terminal symptom in Sail: hangs/spins with no output.
+
+**Diagnosis**: No explicit `mtvec` init in test scaffold. Add check — does test set `mtvec` before any potentially-illegal instr?
+
+**Fix**: Set `mtvec` early in test preamble to valid handler address before any vector/privileged ops.

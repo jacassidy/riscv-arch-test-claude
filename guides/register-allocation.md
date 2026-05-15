@@ -11,7 +11,7 @@ Applies to **every** generator: scalar priv (`generators/testgen/src/testgen/pri
 - **Scalar priv flow** (`Sm.py`, `SmF.py`, `U.py`, `ExceptionsVf.py`, etc.):
   use `test_data.int_regs.get_registers(n)` / `get_registers(1)` to pull `n` random integer registers, analogous `fp_regs` API for floats. Never write `x5`, `x6`, ... directly in emitted asm.
 - **Vector priv flow** (`vector-testgen-priv.py`, `priv/cp_*.py`):
-  call `randomizeVectorInstructionData(instruction, sew, count, ...)` **without** passing `vd=`, `vs1=`, `vs2=`, `rd=`, `rs1=`, `rs2=` args. Read chosen register numbers from `instruction_data[0][...]['reg']` (vector) and `instruction_data[1][...]['reg']` (scalar), use those in any setup / init / fault-trigger lines emitted. For temp scratch registers (e.g. `la random_mask_0` or `vsetivli`'s discarded result), use `pickPrivScratch(scalar_register_data)` helper from `vector_testgen_common` — avoids framework-reserved registers (`x0`–`x5`) and any operand register randomizer chose.
+  call `randomizeVectorInstructionData(instruction, sew, count, ...)` **without** passing `vd=`, `vs1=`, `vs2=`, `rd=`, `rs1=`, `rs2=` args — **when any operand is preset, the function skips all constraint validation** (EMUL alignment, overlap rules, reserved-register exclusion all bypassed). Read chosen register numbers from `instruction_data[0][...]['reg']` (vector) and `instruction_data[1][...]['reg']` (scalar), use those in any setup / init / fault-trigger lines emitted. For temp scratch registers (e.g. `la random_mask_0` or `vsetivli`'s discarded result), use `pickPrivScratch(scalar_register_data)` helper from `vector_testgen_common` — avoids framework-reserved registers (`x0`–`x5`) and any operand register randomizer chose.
 - **Reserved framework registers** (do not pick or clobber): `x0` (zero), `x1` (ra), `x2` (`sigReg`), `x3` (gp), `x4` (`tempReg`), `x5` (`linkReg`). Framework calls `handleSignaturePointerConflict()` to reroute `sigReg` if randomized operand collides with `x2`, but still avoid these as scratch.
 
 If urge to write literal `vd=8` or `la x2, ...` arise, stop and use helpers above. Same for FP: never type `f5` / `f12` / etc. — request FP registers via FP randomizer / `fp_regs` API.
@@ -20,7 +20,7 @@ If urge to write literal `vd=8` or `la x2, ...` arise, stop and use helpers abov
 
 Randomizer not free `randint(0, 31)`. Knows per-instruction rules, rejects illegal picks **if told constraints**:
 
-- **EMUL alignment** for vector LS: `vd` must be `EMUL`-aligned where `EMUL = EEW/SEW × LMUL`. `randomizeVectorInstructionData` handles — do **not** post-process result with `randint()`.
+- **EMUL alignment** for vector LS: `vd` must be `EMUL`-aligned where `EMUL = EEW/SEW × LMUL`. `randomizeVectorInstructionData` handles — do **not** post-process result with `randint()`. `rs1` (base address) comes from `instruction_data[1][...]['reg']` (scalar data); emit setup code that loads an alignment-appropriate address into **that randomly-chosen register** — never a literal register number.
 - **No-overlap rules**: pass `additional_no_overlap=[(opA, opB), ...]` (e.g. widening / narrowing / mask-producing instructions) instead of hand-filtering after.
 - **Segment fit**: `nf × EMUL` must not exceed 32. Randomizer enforces; script's only job = skip illegal `(SEW, LMUL, EEW, nf)` combos *before* calling.
 - **Reserved registers**: `x0`–`x5` framework-reserved. Randomizer avoids; `pickPrivScratch(scalar_register_data)` also avoids any register randomizer just chose for instruction's operands.

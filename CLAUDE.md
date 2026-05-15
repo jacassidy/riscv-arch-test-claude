@@ -19,3 +19,5 @@
 - Definition CSVs: `working-testplans/csvs/Vector - V{ls,x,f}_custom_definitions.csv`.
 - RISC-V V spec: `/home/jacassidy/cvw/addins/riscv-isa-manual/src/v-st-ext.adoc`.
 - `memory/` — state files only (e.g. `progress.json`). Prose → `guides/`.
+- **Grade injected shard reminders** when they were useless/wrong/partial/good: run `/route-feedback`. Large severity → queued for opus audit; small → Sonnet auto-patches next Stop hook.
+- Repo audit playbook (opus, manual): `guides/REPO-AUDIT.md`. Triggered by user when stderr shows `[route.py] AUDIT RECOMMENDED`.
